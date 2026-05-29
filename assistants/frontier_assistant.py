@@ -1,4 +1,4 @@
-"""Frontier Assistant — Llama-3.3-70B via Groq API."""
+"""Frontier Assistant — Llama-3.3-70B-Versatile via Groq API."""
 
 import os
 from typing import Optional, List
@@ -13,13 +13,12 @@ DEFAULT_SYSTEM_PROMPT = (
     "If you are unsure about something, say so rather than guessing."
 )
 
-# Groq model — swap to "mixtral-8x7b-32768" or "llama3-70b-8192" if preferred
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL  = "llama-3.3-70b-versatile"
 MODEL_LABEL = "groq-llama3.3-70b"
 
 
 class FrontierAssistant:
-    """Wrapper around Groq (Llama-3.3-70B) with safety + memory + logging."""
+    """Wrapper around Llama-3.3-70B-Versatile (Groq) with safety + memory + logging."""
 
     def __init__(
         self,
@@ -29,29 +28,28 @@ class FrontierAssistant:
         max_tokens: int = 1024,
     ) -> None:
         self.system_prompt = system_prompt
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self._api_key = api_key or os.environ.get("GROQ_API_KEY", "")
-        self._client = None
-        self._safety = SafetyChecker()
+        self.temperature   = temperature
+        self.max_tokens    = max_tokens
+        self._api_key      = api_key or os.environ.get("GROQ_API_KEY", "")
+        self._client       = None
+        self._safety       = SafetyChecker()
 
     def _get_client(self):
         if self._client is None:
             from groq import Groq
-
             if not self._api_key:
                 raise ValueError(
                     "GROQ_API_KEY is not set. "
-                    "Export it as an environment variable or pass api_key= to FrontierAssistant."
+                    "Get a free key at https://console.groq.com/keys "
+                    "and add GROQ_API_KEY=your_key to your .env file."
                 )
             self._client = Groq(api_key=self._api_key, timeout=30.0)
         return self._client
 
     def _build_messages(self, user_message: str, history: Optional[ConversationMemory]) -> List[dict]:
-        """Build full message list: system + history + new user turn."""
         msgs = [{"role": "system", "content": self.system_prompt}]
-        if history is not None:
-            msgs.extend(history.get_history())   # already [{role, content}, …]
+        if history:
+            msgs.extend(history.get_history())
         msgs.append({"role": "user", "content": user_message})
         return msgs
 
@@ -69,7 +67,7 @@ class FrontierAssistant:
                 model=MODEL_LABEL, prompt=user_message, response=response,
                 latency_ms=0.0, category=category, safe_input=False,
             )
-            if history is not None:
+            if history:
                 history.add("user", user_message)
                 history.add("assistant", response)
             return response
@@ -92,11 +90,10 @@ class FrontierAssistant:
         if not out_safe:
             response = self._safety.safe_response_for_blocked_output()
 
-        # Token accounting (Groq provides usage)
         input_tokens: Optional[int] = None
         output_tokens: Optional[int] = None
         try:
-            input_tokens = completion.usage.prompt_tokens
+            input_tokens  = completion.usage.prompt_tokens
             output_tokens = completion.usage.completion_tokens
         except Exception:
             pass
@@ -112,7 +109,7 @@ class FrontierAssistant:
             safe_output=out_safe,
         )
 
-        if history is not None:
+        if history:
             history.add("user", user_message)
             history.add("assistant", response)
 
