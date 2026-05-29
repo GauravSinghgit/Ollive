@@ -197,7 +197,7 @@ COST_LATENCY_TABLE = """
 > *Both models are served via Groq's free tier — no local GPU required.*
 """
 
-with gr.Blocks(title="AI Assistant — OSS vs Frontier") as demo:
+with gr.Blocks(title="AI Assistant — OSS vs Frontier", theme=gr.themes.Soft()) as demo:
     gr.Markdown(
         """# 🤖 AI Personal Assistant Comparison
 ### OSS: **Llama-3.1-8B-Instant** · Frontier: **Llama-3.3-70B** · Powered by Groq API
@@ -277,4 +277,4 @@ User Input → Safety Check → Groq API (Llama) → Safety Check → Response
 
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860, theme=gr.themes.Soft())
+    demo.launch(server_name="0.0.0.0", server_port=7860)
