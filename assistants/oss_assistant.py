@@ -1,6 +1,6 @@
-"""OSS Assistant — Qwen2.5-0.5B-Instruct via HuggingFace transformers."""
+"""OSS Assistant — Llama-3.1-8B-Instant via Groq API (open-source model, no local RAM needed)."""
 
-import time
+import os
 from typing import Optional, List, Dict
 
 from memory.conversation import ConversationMemory
@@ -13,61 +13,63 @@ DEFAULT_SYSTEM_PROMPT = (
     "If you are unsure about something, say so rather than guessing."
 )
 
-MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
-MODEL_NAME = "qwen2.5-0.5b"
+# Llama-3.1-8B is fully open-source (Meta), served free via Groq
+MODEL_ID   = "llama-3.1-8b-instant"
+MODEL_NAME = "llama-3.1-8b"
 
 
 class OSSAssistant:
-    """Wrapper around Qwen2.5-0.5B-Instruct with safety + memory + logging."""
+    """Wrapper around Llama-3.1-8B-Instant (OSS) via Groq with safety + memory + logging.
+
+    Uses the free Groq API — no local GPU/RAM required.
+    Reads GROQ_API_KEY from .env (same key used by FrontierAssistant).
+    """
 
     def __init__(
         self,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         max_new_tokens: int = 512,
         temperature: float = 0.7,
+        api_key: Optional[str] = None,
     ) -> None:
         self.system_prompt = system_prompt
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
-        self._pipe = None
-        self._tokenizer = None
+        self._api_key = api_key or os.environ.get("GROQ_API_KEY", "")
+        self._client = None
         self._safety = SafetyChecker()
 
-    def _load_model(self) -> None:
-        """Lazy-load the model (only on first call)."""
-        if self._pipe is not None:
-            return
+    def _get_client(self):
+        """Lazy-init the Groq client."""
+        if self._client is not None:
+            return self._client
         try:
-            import torch
-            from transformers import AutoTokenizer, pipeline
-
-            print(f"[OSS] Loading {MODEL_ID} …")
-            self._tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-            device = 0 if torch.cuda.is_available() else -1
-            self._pipe = pipeline(
-                "text-generation",
-                model=MODEL_ID,
-                tokenizer=self._tokenizer,
-                device=device,
-                torch_dtype="auto",
+            from groq import Groq
+        except ImportError:
+            raise RuntimeError("groq is not installed. Run: pip install groq")
+        if not self._api_key:
+            raise ValueError(
+                "GROQ_API_KEY is not set. "
+                "Get a free key at https://console.groq.com/keys "
+                "and add GROQ_API_KEY=your_key to your .env file."
             )
-            print(f"[OSS] Model loaded on {'GPU' if device == 0 else 'CPU'}.")
-        except Exception as exc:
-            raise RuntimeError(f"Failed to load OSS model: {exc}") from exc
+        print(f"[OSS] Connecting to Groq API for {MODEL_ID} (open-source Llama) …")
+        self._client = Groq(api_key=self._api_key, timeout=30.0)
+        print("[OSS] Connected (no local model loaded).")
+        return self._client
 
     def _build_messages(
         self, user_message: str, history: Optional[ConversationMemory]
     ) -> List[Dict[str, str]]:
         msgs = [{"role": "system", "content": self.system_prompt}]
-        if history:
+        if history is not None:
             msgs.extend(history.get_history())
         msgs.append({"role": "user", "content": user_message})
         return msgs
 
     def _count_tokens(self, text: str) -> int:
-        if self._tokenizer is None:
-            return len(text.split())
-        return len(self._tokenizer.encode(text, add_special_tokens=False))
+        """Rough token count (word-based)."""
+        return len(text.split())
 
     def chat(
         self,
@@ -83,25 +85,23 @@ class OSSAssistant:
                 model=MODEL_NAME, prompt=user_message, response=response,
                 latency_ms=0.0, category=category, safe_input=False,
             )
-            if history:
+            if history is not None:
                 history.add("user", user_message)
                 history.add("assistant", response)
             return response
 
-        self._load_model()
+        client = self._get_client()
         messages = self._build_messages(user_message, history)
 
         with timer() as t:
-            out = self._pipe(
-                messages,
-                max_new_tokens=self.max_new_tokens,
+            completion = client.chat.completions.create(
+                model=MODEL_ID,
+                messages=messages,
                 temperature=self.temperature,
-                do_sample=True,
-                return_full_text=False,
-                pad_token_id=self._tokenizer.eos_token_id,
+                max_tokens=self.max_new_tokens,
             )
 
-        response = out[0]["generated_text"].strip()
+        response = completion.choices[0].message.content.strip()
 
         # Safety check on output
         out_safe, out_reason = self._safety.check_output(response)
@@ -109,8 +109,12 @@ class OSSAssistant:
             response = self._safety.safe_response_for_blocked_output()
             out_safe = False
 
-        input_tokens = self._count_tokens(" ".join(m["content"] for m in messages))
-        output_tokens = self._count_tokens(response)
+        try:
+            input_tokens  = completion.usage.prompt_tokens
+            output_tokens = completion.usage.completion_tokens
+        except Exception:
+            input_tokens  = self._count_tokens(" ".join(m["content"] for m in messages))
+            output_tokens = self._count_tokens(response)
 
         default_logger.log_interaction(
             model=MODEL_NAME,
@@ -123,7 +127,7 @@ class OSSAssistant:
             safe_output=out_safe,
         )
 
-        if history:
+        if history is not None:
             history.add("user", user_message)
             history.add("assistant", response)
 

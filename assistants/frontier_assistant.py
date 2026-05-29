@@ -44,13 +44,13 @@ class FrontierAssistant:
                     "GROQ_API_KEY is not set. "
                     "Export it as an environment variable or pass api_key= to FrontierAssistant."
                 )
-            self._client = Groq(api_key=self._api_key)
+            self._client = Groq(api_key=self._api_key, timeout=30.0)
         return self._client
 
     def _build_messages(self, user_message: str, history: Optional[ConversationMemory]) -> List[dict]:
         """Build full message list: system + history + new user turn."""
         msgs = [{"role": "system", "content": self.system_prompt}]
-        if history:
+        if history is not None:
             msgs.extend(history.get_history())   # already [{role, content}, …]
         msgs.append({"role": "user", "content": user_message})
         return msgs
@@ -69,7 +69,7 @@ class FrontierAssistant:
                 model=MODEL_LABEL, prompt=user_message, response=response,
                 latency_ms=0.0, category=category, safe_input=False,
             )
-            if history:
+            if history is not None:
                 history.add("user", user_message)
                 history.add("assistant", response)
             return response
@@ -112,7 +112,7 @@ class FrontierAssistant:
             safe_output=out_safe,
         )
 
-        if history:
+        if history is not None:
             history.add("user", user_message)
             history.add("assistant", response)
 

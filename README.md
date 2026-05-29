@@ -7,8 +7,8 @@ Side-by-side comparison of an **open-source model** (Qwen2.5-0.5B-Instruct) and 
 ## Quick Start
 
 ```bash
-git clone https://github.com/your-username/ai-assistant-comparison
-cd ai-assistant-comparison
+git clone https://github.com/GauravSinghgit/Ollive
+cd Ollive
 
 pip install -r requirements.txt
 

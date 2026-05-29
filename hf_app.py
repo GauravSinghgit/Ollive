@@ -1,11 +1,14 @@
 """
-Hugging Face Spaces deployment — OSS assistant (Qwen2.5-0.5B-Instruct).
+Hugging Face Spaces deployment — OSS vs Frontier comparison via Groq API.
+
+Both models are served through Groq (no local model loading):
+  - OSS tab:      Llama-3.1-8B-Instant  (open-source, free)
+  - Frontier tab: Llama-3.3-70B         (frontier, free tier)
 
 Deploy to HF Spaces:
   1. Create a new Space (Gradio SDK)
-  2. Push this file as app.py
-  3. Push requirements_hf.txt as requirements.txt
-  4. Optionally set GROQ_API_KEY secret for the comparison tab
+  2. Push this repo as the Space source
+  3. Add GROQ_API_KEY as a Space secret (Settings → Variables and secrets)
 
 HF Spaces metadata (place in README.md of the Space):
 ---
@@ -15,65 +18,53 @@ colorFrom: blue
 colorTo: orange
 sdk: gradio
 sdk_version: "4.44.0"
-app_file: app.py
+app_file: hf_app.py
 pinned: false
 ---
 """
 
 import os
-import sys
-import threading
+import re
 import time
 from datetime import date
-from pathlib import Path
 
 import gradio as gr
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ---------------------------------------------------------------------------
-# Model loading (lazy, thread-safe)
+# Groq client (shared)
 # ---------------------------------------------------------------------------
-_pipe = None
-_tokenizer = None
-_load_lock = threading.Lock()
-_load_error: str = ""
-
-MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
-MAX_NEW_TOKENS = 512
+_groq_client = None
 
 
-def _load_model():
-    global _pipe, _tokenizer, _load_error
-    with _load_lock:
-        if _pipe is not None or _load_error:
-            return
-        try:
-            import torch
-            from transformers import AutoTokenizer, pipeline
-
-            print(f"[HF] Loading {MODEL_ID} …", flush=True)
-            _tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-            device = 0 if torch.cuda.is_available() else -1
-            _pipe = pipeline(
-                "text-generation",
-                model=MODEL_ID,
-                tokenizer=_tokenizer,
-                device=device,
-                torch_dtype="auto",
+def _get_groq():
+    global _groq_client
+    if _groq_client is None:
+        from groq import Groq
+        api_key = os.environ.get("GROQ_API_KEY", "")
+        if not api_key:
+            raise ValueError(
+                "GROQ_API_KEY is not set. "
+                "Add it as a Space secret: Settings → Variables and secrets."
             )
-            print(f"[HF] Model ready on {'GPU' if device == 0 else 'CPU'}.", flush=True)
-        except Exception as exc:
-            _load_error = str(exc)
-            print(f"[HF] Load error: {exc}", flush=True)
+        _groq_client = Groq(api_key=api_key, timeout=30.0)
+    return _groq_client
 
 
-# Begin loading in background immediately
-threading.Thread(target=_load_model, daemon=True).start()
+OSS_MODEL      = "llama-3.1-8b-instant"
+FRONTIER_MODEL = "llama-3.3-70b-versatile"
+
+SYSTEM_PROMPT = (
+    "You are a helpful, harmless, and honest AI assistant. "
+    "Answer questions accurately and concisely. "
+    "If you are unsure about something, say so."
+)
 
 # ---------------------------------------------------------------------------
-# Safety (inline — no external module dependency for HF Spaces)
+# Safety
 # ---------------------------------------------------------------------------
-import re
-
 _HARM_PATTERNS = [
     re.compile(p, re.IGNORECASE | re.DOTALL)
     for p in [
@@ -84,17 +75,7 @@ _HARM_PATTERNS = [
         r"\b(csam|child\s+porn)\b",
     ]
 ]
-
-REFUSAL = (
-    "I'm sorry, but I can't help with that request. "
-    "Please ask me something else!"
-)
-
-SYSTEM_PROMPT = (
-    "You are a helpful, harmless, and honest AI assistant. "
-    "Answer questions accurately and concisely. "
-    "If you are unsure about something, say so."
-)
+REFUSAL = "I'm sorry, but I can't help with that request. Please ask me something else!"
 
 
 def _is_safe(text: str) -> bool:
@@ -104,13 +85,11 @@ def _is_safe(text: str) -> bool:
 # ---------------------------------------------------------------------------
 # Simple tools
 # ---------------------------------------------------------------------------
-def _maybe_use_tool(message: str) -> str | None:
-    """If the message is clearly a tool request, return a direct answer."""
+def _maybe_use_tool(message: str):
     msg = message.lower().strip()
     if any(kw in msg for kw in ("today's date", "what is today", "what's today", "current date")):
         return f"Today's date is {date.today().strftime('%B %d, %Y')}."
     if any(kw in msg for kw in ("calculate", "what is", "compute")) and any(op in message for op in "+-*/"):
-        # Simple expression extraction
         expr = re.sub(r"[^0-9+\-*/(). ]", "", message)
         try:
             result = eval(expr.strip(), {"__builtins__": {}}, {})  # noqa: S307
@@ -121,7 +100,7 @@ def _maybe_use_tool(message: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Conversation history management
+# Core chat function
 # ---------------------------------------------------------------------------
 def _build_messages(history_state: list, user_message: str) -> list:
     msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -133,10 +112,7 @@ def _build_messages(history_state: list, user_message: str) -> list:
     return msgs
 
 
-# ---------------------------------------------------------------------------
-# Main chat function
-# ---------------------------------------------------------------------------
-def chat(user_message: str, history_state: list):
+def _chat(model_id: str, user_message: str, history_state: list):
     if not user_message.strip():
         yield history_state, history_state, ""
         return
@@ -146,43 +122,44 @@ def chat(user_message: str, history_state: list):
         yield updated, updated, "⚠️ Safety block triggered"
         return
 
-    # Tool shortcut
     tool_response = _maybe_use_tool(user_message)
     if tool_response:
         updated = history_state + [[user_message, tool_response]]
         yield updated, updated, "⚡ Tool response"
         return
 
-    # Wait for model to load
-    if _pipe is None and not _load_error:
-        loading_history = history_state + [[user_message, "⏳ *Loading model, please wait…*"]]
-        yield loading_history, history_state, "Loading model…"
-        while _pipe is None and not _load_error:
-            time.sleep(1)
-
-    if _load_error:
-        error_history = history_state + [[user_message, f"❌ *Model failed to load: {_load_error}*"]]
-        yield error_history, history_state, "Error"
+    try:
+        client = _get_groq()
+    except ValueError as exc:
+        error_msg = f"❌ Configuration error: {exc}"
+        updated = history_state + [[user_message, error_msg]]
+        yield updated, history_state, "Config error"
         return
 
     messages = _build_messages(history_state, user_message)
     t0 = time.perf_counter()
     try:
-        out = _pipe(
-            messages,
-            max_new_tokens=MAX_NEW_TOKENS,
+        completion = client.chat.completions.create(
+            model=model_id,
+            messages=messages,
             temperature=0.7,
-            do_sample=True,
-            return_full_text=False,
-            pad_token_id=_tokenizer.eos_token_id,
+            max_tokens=512,
         )
-        response = out[0]["generated_text"].strip()
+        response = completion.choices[0].message.content.strip()
     except Exception as exc:
-        response = f"*Error generating response: {exc}*"
+        response = f"*Error: {exc}*"
 
     latency_ms = (time.perf_counter() - t0) * 1000
     updated = history_state + [[user_message, response]]
     yield updated, updated, f"⏱ {latency_ms:.0f} ms"
+
+
+def chat_oss(user_message, history_state):
+    yield from _chat(OSS_MODEL, user_message, history_state)
+
+
+def chat_frontier(user_message, history_state):
+    yield from _chat(FRONTIER_MODEL, user_message, history_state)
 
 
 def clear_chat():
@@ -195,61 +172,63 @@ def clear_chat():
 COST_LATENCY_TABLE = """
 ## 📊 Cost & Latency Reference
 
-| Metric | OSS (Qwen2.5-0.5B) | Frontier (Gemini 2.0 Flash) |
-|--------|--------------------|-----------------------------|
-| **Hosting** | HF Spaces free CPU | Google AI Studio API |
-| **Avg latency (CPU)** | 8,000–30,000 ms | 800–2,000 ms |
-| **Avg latency (GPU)** | 500–2,000 ms | 800–2,000 ms |
-| **Input cost / 1M tokens** | Free (self-hosted) | $0.10 |
-| **Output cost / 1M tokens** | Free (self-hosted) | $0.40 |
-| **Max context** | 32,768 tokens | 1,048,576 tokens |
-| **Parameters** | 0.5 B | ~1 T (estimated) |
-| **Open weights** | ✅ Yes | ❌ No |
+| Metric | OSS (Llama-3.1-8B) | Frontier (Llama-3.3-70B) |
+|--------|-------------------|--------------------------|
+| **Provider** | Groq API | Groq API |
+| **Avg latency** | 300–800 ms | 500–1,500 ms |
+| **Input cost / 1M tokens** | Free (Groq free tier) | Free (Groq free tier) |
+| **Output cost / 1M tokens** | Free (Groq free tier) | Free (Groq free tier) |
+| **Max context** | 128,000 tokens | 128,000 tokens |
+| **Parameters** | 8 B | 70 B |
+| **Open weights** | ✅ Yes (Meta) | ✅ Yes (Meta) |
 
-> *CPU latency is hardware-dependent. HF Spaces free tier uses 2-core CPU.*
+> *Both models are served via Groq's free tier — no local GPU required.*
 """
 
-with gr.Blocks(title="AI Assistant — OSS (Qwen2.5-0.5B)") as demo:
+with gr.Blocks(title="AI Assistant — OSS vs Frontier") as demo:
     gr.Markdown(
-        """# 🤖 AI Personal Assistant
-### OSS Model: **Qwen2.5-0.5B-Instruct** · Deployed on Hugging Face Spaces
+        """# 🤖 AI Personal Assistant Comparison
+### OSS: **Llama-3.1-8B-Instant** · Frontier: **Llama-3.3-70B** · Powered by Groq API
 
-*Model loads on first message (may take ~30 seconds on CPU). Safety guardrails active.*"""
+*Both models respond via API — no local model loading, fast cold start.*"""
     )
 
     with gr.Tabs():
-        with gr.Tab("💬 Chat"):
-            chatbot = gr.Chatbot(
-                height=500,
-                label="Qwen2.5-0.5B-Instruct",
-            )
-            status_bar = gr.Markdown("*Model loading in background…*")
-
+        # ── OSS Tab ───────────────────────────────────────────────────────
+        with gr.Tab("💬 OSS — Llama-3.1-8B"):
+            oss_chatbot = gr.Chatbot(height=450, label="Llama-3.1-8B-Instant (OSS)")
+            oss_status  = gr.Markdown("*Ready.*")
             with gr.Row():
-                msg_input = gr.Textbox(
-                    placeholder="Ask me anything…",
-                    label="",
-                    scale=5,
-                    autofocus=True,
-                )
-                send_btn = gr.Button("Send ▶", variant="primary", scale=1)
-                clear_btn = gr.Button("🗑️", scale=0)
+                oss_input = gr.Textbox(placeholder="Ask me anything…", label="", scale=5, autofocus=True)
+                gr.Button("Send ▶", variant="primary", scale=1).click(
+                    chat_oss,
+                    inputs=[oss_input, gr.State([])],
+                    outputs=[oss_chatbot, gr.State([]), oss_status],
+                ).then(lambda: "", outputs=[oss_input])
+                gr.Button("🗑️", scale=0).click(clear_chat, outputs=[oss_chatbot, gr.State([]), oss_status])
+            oss_input.submit(
+                chat_oss,
+                inputs=[oss_input, gr.State([])],
+                outputs=[oss_chatbot, gr.State([]), oss_status],
+            ).then(lambda: "", outputs=[oss_input])
 
-            history_state = gr.State([])
-
-            send_btn.click(
-                chat,
-                inputs=[msg_input, history_state],
-                outputs=[chatbot, history_state, status_bar],
-            ).then(lambda: "", outputs=[msg_input])
-
-            msg_input.submit(
-                chat,
-                inputs=[msg_input, history_state],
-                outputs=[chatbot, history_state, status_bar],
-            ).then(lambda: "", outputs=[msg_input])
-
-            clear_btn.click(clear_chat, outputs=[chatbot, history_state, status_bar])
+        # ── Frontier Tab ─────────────────────────────────────────────────
+        with gr.Tab("🚀 Frontier — Llama-3.3-70B"):
+            fr_chatbot = gr.Chatbot(height=450, label="Llama-3.3-70B-Versatile (Frontier)")
+            fr_status  = gr.Markdown("*Ready.*")
+            with gr.Row():
+                fr_input = gr.Textbox(placeholder="Ask me anything…", label="", scale=5)
+                gr.Button("Send ▶", variant="primary", scale=1).click(
+                    chat_frontier,
+                    inputs=[fr_input, gr.State([])],
+                    outputs=[fr_chatbot, gr.State([]), fr_status],
+                ).then(lambda: "", outputs=[fr_input])
+                gr.Button("🗑️", scale=0).click(clear_chat, outputs=[fr_chatbot, gr.State([]), fr_status])
+            fr_input.submit(
+                chat_frontier,
+                inputs=[fr_input, gr.State([])],
+                outputs=[fr_chatbot, gr.State([]), fr_status],
+            ).then(lambda: "", outputs=[fr_input])
 
         with gr.Tab("📊 Cost & Latency"):
             gr.Markdown(COST_LATENCY_TABLE)
@@ -258,29 +237,27 @@ with gr.Blocks(title="AI Assistant — OSS (Qwen2.5-0.5B)") as demo:
             gr.Markdown(
                 """## About This App
 
-This assistant is part of an **AI Personal Assistant Comparison** project.
+This assistant is part of an **AI Personal Assistant Comparison** project evaluating OSS vs Frontier models.
 
-### Model
-- **Qwen2.5-0.5B-Instruct** by Alibaba Cloud
-- 0.5 billion parameters
-- Apache 2.0 license
-- Excellent instruction-following for its size
+### Models
+- **Llama-3.1-8B-Instant** — Meta, open-source, 8B parameters, served via Groq
+- **Llama-3.3-70B-Versatile** — Meta, open-source, 70B parameters, served via Groq
 
 ### Features
-- ✅ Multi-turn conversation memory (last 20 turns)
+- ✅ Multi-turn conversation memory
 - ✅ Safety guardrails (jailbreak resistance)
 - ✅ Basic tool use (date, calculator)
-- ✅ Three persona modes
+- ✅ Side-by-side model comparison
 
 ### Architecture
 ```
-User Input → Safety Check → Chat Template → Qwen2.5 → Safety Check → Response
-                                                ↑
-                                    Conversation History
+User Input → Safety Check → Groq API (Llama) → Safety Check → Response
+                                   ↑
+                       Conversation History (in-session)
 ```
 
 ### GitHub
-[Source Code](https://github.com/your-username/ai-assistant-comparison)
+[Source Code](https://github.com/GauravSinghgit/Ollive)
 """
             )
 
