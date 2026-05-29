@@ -4,7 +4,7 @@ emoji: 🤖
 colorFrom: blue
 colorTo: purple
 sdk: gradio
-sdk_version: "5.9.1"
+sdk_version: "5.25.0"
 app_file: hf_app.py
 pinned: false
 ---
@@ -147,7 +147,7 @@ emoji: 🤖
 colorFrom: blue
 colorTo: orange
 sdk: gradio
-sdk_version: "5.9.1"
+sdk_version: "5.25.0"
 app_file: app.py
 pinned: false
 ---
