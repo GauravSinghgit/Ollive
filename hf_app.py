@@ -102,12 +102,12 @@ def _maybe_use_tool(message: str):
 # ---------------------------------------------------------------------------
 # Core chat function
 # ---------------------------------------------------------------------------
-def _build_messages(history_state: list, user_message: str) -> list:
+def _build_api_messages(history_state: list, user_message: str) -> list:
+    """Build Groq API message list from history (list of dicts) + new user message."""
     msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
-    for user_msg, assistant_msg in history_state:
-        msgs.append({"role": "user", "content": user_msg})
-        if assistant_msg:
-            msgs.append({"role": "assistant", "content": assistant_msg})
+    for msg in history_state:
+        if msg["role"] in ("user", "assistant"):
+            msgs.append({"role": msg["role"], "content": msg["content"]})
     msgs.append({"role": "user", "content": user_message})
     return msgs
 
@@ -118,13 +118,19 @@ def _chat(model_id: str, user_message: str, history_state: list):
         return
 
     if not _is_safe(user_message):
-        updated = history_state + [[user_message, REFUSAL]]
+        updated = history_state + [
+            {"role": "user", "content": user_message},
+            {"role": "assistant", "content": REFUSAL},
+        ]
         yield updated, updated, "⚠️ Safety block triggered"
         return
 
     tool_response = _maybe_use_tool(user_message)
     if tool_response:
-        updated = history_state + [[user_message, tool_response]]
+        updated = history_state + [
+            {"role": "user", "content": user_message},
+            {"role": "assistant", "content": tool_response},
+        ]
         yield updated, updated, "⚡ Tool response"
         return
 
@@ -132,16 +138,19 @@ def _chat(model_id: str, user_message: str, history_state: list):
         client = _get_groq()
     except ValueError as exc:
         error_msg = f"❌ Configuration error: {exc}"
-        updated = history_state + [[user_message, error_msg]]
+        updated = history_state + [
+            {"role": "user", "content": user_message},
+            {"role": "assistant", "content": error_msg},
+        ]
         yield updated, history_state, "Config error"
         return
 
-    messages = _build_messages(history_state, user_message)
+    api_messages = _build_api_messages(history_state, user_message)
     t0 = time.perf_counter()
     try:
         completion = client.chat.completions.create(
             model=model_id,
-            messages=messages,
+            messages=api_messages,
             temperature=0.7,
             max_tokens=512,
         )
@@ -150,7 +159,10 @@ def _chat(model_id: str, user_message: str, history_state: list):
         response = f"*Error: {exc}*"
 
     latency_ms = (time.perf_counter() - t0) * 1000
-    updated = history_state + [[user_message, response]]
+    updated = history_state + [
+        {"role": "user", "content": user_message},
+        {"role": "assistant", "content": response},
+    ]
     yield updated, updated, f"⏱ {latency_ms:.0f} ms"
 
 
@@ -196,38 +208,40 @@ with gr.Blocks(title="AI Assistant — OSS vs Frontier") as demo:
     with gr.Tabs():
         # ── OSS Tab ───────────────────────────────────────────────────────
         with gr.Tab("💬 OSS — Llama-3.1-8B"):
-            oss_chatbot = gr.Chatbot(height=450, label="Llama-3.1-8B-Instant (OSS)")
+            oss_state   = gr.State([])
+            oss_chatbot = gr.Chatbot(height=450, label="Llama-3.1-8B-Instant (OSS)", type="messages")
             oss_status  = gr.Markdown("*Ready.*")
             with gr.Row():
                 oss_input = gr.Textbox(placeholder="Ask me anything…", label="", scale=5, autofocus=True)
                 gr.Button("Send ▶", variant="primary", scale=1).click(
                     chat_oss,
-                    inputs=[oss_input, gr.State([])],
-                    outputs=[oss_chatbot, gr.State([]), oss_status],
+                    inputs=[oss_input, oss_state],
+                    outputs=[oss_chatbot, oss_state, oss_status],
                 ).then(lambda: "", outputs=[oss_input])
-                gr.Button("🗑️", scale=0).click(clear_chat, outputs=[oss_chatbot, gr.State([]), oss_status])
+                gr.Button("🗑️", scale=0).click(clear_chat, outputs=[oss_chatbot, oss_state, oss_status])
             oss_input.submit(
                 chat_oss,
-                inputs=[oss_input, gr.State([])],
-                outputs=[oss_chatbot, gr.State([]), oss_status],
+                inputs=[oss_input, oss_state],
+                outputs=[oss_chatbot, oss_state, oss_status],
             ).then(lambda: "", outputs=[oss_input])
 
         # ── Frontier Tab ─────────────────────────────────────────────────
         with gr.Tab("🚀 Frontier — Llama-3.3-70B"):
-            fr_chatbot = gr.Chatbot(height=450, label="Llama-3.3-70B-Versatile (Frontier)")
+            fr_state   = gr.State([])
+            fr_chatbot = gr.Chatbot(height=450, label="Llama-3.3-70B-Versatile (Frontier)", type="messages")
             fr_status  = gr.Markdown("*Ready.*")
             with gr.Row():
                 fr_input = gr.Textbox(placeholder="Ask me anything…", label="", scale=5)
                 gr.Button("Send ▶", variant="primary", scale=1).click(
                     chat_frontier,
-                    inputs=[fr_input, gr.State([])],
-                    outputs=[fr_chatbot, gr.State([]), fr_status],
+                    inputs=[fr_input, fr_state],
+                    outputs=[fr_chatbot, fr_state, fr_status],
                 ).then(lambda: "", outputs=[fr_input])
-                gr.Button("🗑️", scale=0).click(clear_chat, outputs=[fr_chatbot, gr.State([]), fr_status])
+                gr.Button("🗑️", scale=0).click(clear_chat, outputs=[fr_chatbot, fr_state, fr_status])
             fr_input.submit(
                 chat_frontier,
-                inputs=[fr_input, gr.State([])],
-                outputs=[fr_chatbot, gr.State([]), fr_status],
+                inputs=[fr_input, fr_state],
+                outputs=[fr_chatbot, fr_state, fr_status],
             ).then(lambda: "", outputs=[fr_input])
 
         with gr.Tab("📊 Cost & Latency"):
