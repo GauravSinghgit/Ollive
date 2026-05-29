@@ -186,15 +186,19 @@ COST_LATENCY_TABLE = """
 
 | Metric | OSS (Llama-3.1-8B) | Frontier (Llama-3.3-70B) |
 |--------|-------------------|--------------------------|
+| **Model type** | Open-source (Meta) | Open-weight, frontier-scale |
 | **Provider** | Groq API | Groq API |
 | **Avg latency** | 300–800 ms | 500–1,500 ms |
-| **Input cost / 1M tokens** | Free (Groq free tier) | Free (Groq free tier) |
-| **Output cost / 1M tokens** | Free (Groq free tier) | Free (Groq free tier) |
+| **Input cost / 1M tokens** | $0.05 (paid) · Free tier available | $0.59 (paid) · Free tier available |
+| **Output cost / 1M tokens** | $0.08 (paid) · Free tier available | $0.79 (paid) · Free tier available |
 | **Max context** | 128,000 tokens | 128,000 tokens |
 | **Parameters** | 8 B | 70 B |
-| **Open weights** | ✅ Yes (Meta) | ✅ Yes (Meta) |
+| **Open weights** | ✅ Yes (Meta Llama 3) | ✅ Yes (Meta Llama 3) |
+| **Self-hostable** | ✅ Yes (no vendor lock-in) | ✅ Yes (no vendor lock-in) |
+| **Relative cost** | 💚 ~12× cheaper than frontier | 🔴 Premium pricing |
 
-> *Both models are served via Groq's free tier — no local GPU required.*
+> *This demo uses Groq's free tier. Paid pricing shown for production cost planning.*
+> *OSS model (8B) can also be self-hosted on a single GPU for ~$0 marginal cost.*
 """
 
 with gr.Blocks(title="AI Assistant — OSS vs Frontier", theme=gr.themes.Soft()) as demo:

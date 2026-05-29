@@ -76,8 +76,8 @@ def respond(
     is_safe, _ = _safety.check_input(user_message)
     if not is_safe:
         refusal = _safety.safe_response_for_blocked_input()
-        oss_history = oss_history + [[user_message, f"⚠️ **Safety block:** {refusal}"]]
-        frontier_history = frontier_history + [[user_message, f"⚠️ **Safety block:** {refusal}"]]
+        oss_history = oss_history + [{"role": "user", "content": user_message}, {"role": "assistant", "content": f"⚠️ **Safety block:** {refusal}"}]
+        frontier_history = frontier_history + [{"role": "user", "content": user_message}, {"role": "assistant", "content": f"⚠️ **Safety block:** {refusal}"}]
         return oss_history, frontier_history, oss_mem, frontier_mem, "", ""
 
     oss_response = "*(OSS model not loaded)*"
@@ -107,8 +107,8 @@ def respond(
     except Exception as e:
         frontier_response = f"*(Frontier error: {e})*"
 
-    oss_history = oss_history + [[user_message, oss_response]]
-    frontier_history = frontier_history + [[user_message, frontier_response]]
+    oss_history = oss_history + [{"role": "user", "content": user_message}, {"role": "assistant", "content": oss_response}]
+    frontier_history = frontier_history + [{"role": "user", "content": user_message}, {"role": "assistant", "content": frontier_response}]
 
     oss_status = f"⏱ OSS: {oss_latency:.0f} ms"
     frontier_status = f"⏱ Frontier: {frontier_latency:.0f} ms"

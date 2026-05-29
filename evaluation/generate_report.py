@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import numpy as np
 
-OSS_COLOR      = "#4C9BE8"   # blue  — Qwen2.5-0.5B
-FRONTIER_COLOR = "#F97316"   # orange — Groq Llama-3.3-70B
+OSS_COLOR      = "#4C9BE8"   # blue  — Llama-3.1-8B
+FRONTIER_COLOR = "#F97316"   # orange — Llama-3.3-70B
 BG_COLOR       = "#F9FAFB"
 GRID_COLOR     = "#E5E7EB"
 
@@ -19,8 +19,8 @@ GRID_COLOR     = "#E5E7EB"
 def _bar_group(ax, labels, oss_vals, frontier_vals, title, ylabel="Score (1–5)"):
     x = np.arange(len(labels))
     w = 0.35
-    bars_oss = ax.bar(x - w / 2, oss_vals, w, label="OSS (Qwen2.5-0.5B)",          color=OSS_COLOR,      zorder=3)
-    bars_fr  = ax.bar(x + w / 2, frontier_vals, w, label="Frontier (Groq Llama-3.3-70B)", color=FRONTIER_COLOR, zorder=3)
+    bars_oss = ax.bar(x - w / 2, oss_vals, w, label="OSS (Llama-3.1-8B)",           color=OSS_COLOR,      zorder=3)
+    bars_fr  = ax.bar(x + w / 2, frontier_vals, w, label="Frontier (Llama-3.3-70B)", color=FRONTIER_COLOR, zorder=3)
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=9)
     ax.set_ylim(0, 5.5)
@@ -67,7 +67,7 @@ def generate_report(
     fig = plt.figure(figsize=(16, 12), facecolor="white")
     fig.suptitle(
         "AI Assistant Evaluation Report\n"
-        "Qwen2.5-0.5B-Instruct  vs  Groq Llama-3.3-70B-Versatile",
+        "OSS: Llama-3.1-8B-Instant  vs  Frontier: Llama-3.3-70B-Versatile  (via Groq)",
         fontsize=14, fontweight="bold", y=0.98,
     )
 
@@ -110,8 +110,8 @@ def generate_report(
 
     # Shared legend
     legend_patches = [
-        mpatches.Patch(color=OSS_COLOR,      label="OSS — Qwen2.5-0.5B-Instruct"),
-        mpatches.Patch(color=FRONTIER_COLOR, label="Frontier — Groq Llama-3.3-70B"),
+        mpatches.Patch(color=OSS_COLOR,      label="OSS — Llama-3.1-8B-Instant (Groq)"),
+        mpatches.Patch(color=FRONTIER_COLOR, label="Frontier — Llama-3.3-70B-Versatile (Groq)"),
     ]
     fig.legend(handles=legend_patches, loc="lower center", ncol=2,
                fontsize=10, frameon=False,
@@ -126,7 +126,7 @@ def generate_report(
              ha="center", fontsize=8, color="#6B7280")
 
     plt.tight_layout(rect=[0, 0.06, 1, 0.96])
-    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(f"[report] Saved: {output_path}")
     return output_path
@@ -141,19 +141,21 @@ def generate_latency_table(
     output_path = output_path or Path("results") / "latency_cost_table.png"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    fig, ax = plt.subplots(figsize=(10, 4), facecolor="white")
+    fig, ax = plt.subplots(figsize=(12, 5), facecolor="white")
     ax.axis("off")
 
-    headers = ["Metric", "OSS (Qwen2.5-0.5B)", "Frontier (Groq Llama-3.3-70B)"]
+    headers = ["Metric", "OSS (Llama-3.1-8B)", "Frontier (Llama-3.3-70B)"]
     rows = [
-        ["Model",          "Qwen/Qwen2.5-0.5B-Instruct",          "llama-3.3-70b-versatile (Groq)"],
-        ["Hosting",        "HuggingFace Spaces (free CPU)",        "Groq Cloud API"],
+        ["Model",                    "llama-3.1-8b-instant (Groq)",   "llama-3.3-70b-versatile (Groq)"],
+        ["Hosting",                  "HuggingFace Spaces (free)",      "HuggingFace Spaces (free)"],
         ["Avg Latency (ms)",
-         f"{oss_metrics.get('avg_latency_ms', 0):.0f}" if oss_metrics.get('avg_latency_ms') else "~8,000–30,000*",
-         f"{frontier_metrics.get('avg_latency_ms', 0):.0f}" if frontier_metrics.get('avg_latency_ms') else "~200–800"],
-        ["Input cost per 1M tokens",  "Free (self-hosted)", "$0.59"],
-        ["Output cost per 1M tokens", "Free (self-hosted)", "$0.79"],
-        ["GPU required",   "No (CPU OK for 0.5B)", "No (API)"],
+         f"{oss_metrics.get('avg_latency_ms', 0):.0f}" if oss_metrics.get('avg_latency_ms') else "300–800",
+         f"{frontier_metrics.get('avg_latency_ms', 0):.0f}" if frontier_metrics.get('avg_latency_ms') else "500–1,500"],
+        ["Input cost / 1M tokens",   "$0.05 (paid tier)",             "$0.59 (paid tier)"],
+        ["Output cost / 1M tokens",  "$0.08 (paid tier)",             "$0.79 (paid tier)"],
+        ["Max context",              "128,000 tokens",                 "128,000 tokens"],
+        ["Parameters",               "8B",                             "70B"],
+        ["Open weights",             "✅ Meta Llama 3",                "✅ Meta Llama 3"],
         ["Total interactions",
          str(oss_metrics.get("total", "—")),
          str(frontier_metrics.get("total", "—"))],
@@ -178,11 +180,11 @@ def generate_latency_table(
         cell.set_edgecolor("#D1D5DB")
 
     ax.set_title(
-        "Cost & Latency Comparison Table\n* OSS latency on CPU depends on hardware",
-        fontsize=11, fontweight="bold", pad=12,
+        "Cost & Latency Comparison Table",
+        fontsize=12, fontweight="bold", pad=12,
     )
     plt.tight_layout()
-    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(f"[report] Saved: {output_path}")
     return output_path
