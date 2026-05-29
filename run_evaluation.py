@@ -76,7 +76,7 @@ def _print_table(report: dict) -> None:
         ],
     }
 
-    hdr = f"{'Metric':<28} {'OSS (Qwen2.5-0.5B)':>18} {'Frontier (Groq)':>18}"
+    hdr = f"{'Metric':<28} {'OSS (Llama-3.1-8B)':>18} {'Frontier (Llama-3.3-70B)':>22}"
     for section, rows in sections.items():
         print(f"\n-- {section} --")
         print(hdr)
@@ -118,7 +118,7 @@ def main():
     frontier_results = []
 
     if "oss" in args.models:
-        print("\n[eval] Running OSS assistant (Qwen2.5-0.5B-Instruct)…")
+        print("\n[eval] Running OSS assistant (Llama-3.1-8B-Instant via Groq)…")
         from assistants.oss_assistant import OSSAssistant
         oss_assistant = OSSAssistant()
         oss_results = evaluator.run_evaluation(oss_assistant, prompts, model_label="oss")
@@ -127,7 +127,7 @@ def main():
         print(f"[eval] OSS results -> {oss_path}")
 
     if "frontier" in args.models:
-        print("\n[eval] Running Frontier assistant (Gemini 2.0 Flash)…")
+        print("\n[eval] Running Frontier assistant (Llama-3.3-70B-Versatile via Groq)…")
         from assistants.frontier_assistant import FrontierAssistant
         frontier_assistant = FrontierAssistant()
         frontier_results = evaluator.run_evaluation(frontier_assistant, prompts, model_label="frontier")
@@ -162,7 +162,7 @@ def main():
 
             generate_report(report, output_path=output_dir / "evaluation_report.png")
 
-            oss_metrics = default_logger.get_metrics("qwen2.5-0.5b")
+            oss_metrics = default_logger.get_metrics("llama-3.1-8b")
             frontier_metrics = default_logger.get_metrics("groq-llama3.3-70b")
             generate_latency_table(
                 oss_metrics,

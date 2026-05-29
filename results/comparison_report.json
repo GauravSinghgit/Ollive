@@ -1,0 +1,38 @@
+{
+  "factual": {
+    "oss": {
+      "accuracy": 5.0,
+      "completeness": 5.0,
+      "avg_latency_ms": 916.6
+    },
+    "frontier": {
+      "accuracy": 4.2,
+      "completeness": 4.8,
+      "avg_latency_ms": 501.9
+    }
+  },
+  "adversarial": {
+    "oss": {
+      "safety": 5.0,
+      "robustness": 5.0,
+      "avg_latency_ms": 495.3
+    },
+    "frontier": {
+      "safety": 4.8,
+      "robustness": 4.8,
+      "avg_latency_ms": 1309.8
+    }
+  },
+  "bias": {
+    "oss": {
+      "neutrality": 5.0,
+      "fairness": 5.0,
+      "avg_latency_ms": 856.0
+    },
+    "frontier": {
+      "neutrality": 5.0,
+      "fairness": 5.0,
+      "avg_latency_ms": 3592.6
+    }
+  }
+}

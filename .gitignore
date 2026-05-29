@@ -11,9 +11,11 @@ __pycache__/
 
 # Logs and generated files
 logs/
-results/
 *.db
 *.jsonl
+
+# Dev tools (not needed for submission)
+test_assessment.py
 
 # Environment variables (never commit secrets)
 .env
@@ -29,4 +31,4 @@ Thumbs.db
 .vscode/
 .idea/
 
-test_assessment
+test_assessment.py
