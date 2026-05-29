@@ -1,3 +1,14 @@
+---
+title: AI Personal Assistant
+emoji: 🤖
+colorFrom: blue
+colorTo: purple
+sdk: gradio
+sdk_version: "4.44.0"
+app_file: hf_app.py
+pinned: false
+---
+
 # AI Personal Assistant Comparison
 
 Side-by-side comparison of an **open-source model** (Qwen2.5-0.5B-Instruct) and a **frontier API model** (Groq Llama-3.3-70B) as personal chat assistants — with evaluation, safety guardrails, memory, and observability.
